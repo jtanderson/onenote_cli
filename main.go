@@ -53,14 +53,35 @@ const (
 
 	// StateViewNotebooks shows the notebooks
 	StateViewNotebooks
+
+	// StateLoadSections loads the sections
+	StateLoadSections
+
+	// StateViewSections shows the notebook sections
+	StateViewSections
+
+	// StateLoadPages loads the section pages
+	StateLoadPages
+
+	// StateViewPages shows the secion pages
+	StateViewPages
+
+	// StateLoadPage loads a section page
+	StateLoadPage
+
+	// StateViewPage shows the section page
+	StateViewPage
 )
 
 const (
-	// URLPages stores the OneNote pages base url
-	URLPages = "https://www.onenote.com/api/v1.0/me/notes/pages"
+	// URLGETPages stores the OneNote pages base url
+	URLGETPages = "https://www.onenote.com/api/v1.0/me/notes/pages"
 
-	// URLNotebooks stores the OneNote notebooks base url
-	URLNotebooks = "https://www.onenote.com/api/v1.0/me/notes/notebooks"
+	// URLGETNotebooks stores the OneNote notebooks base url
+	URLGETNotebooks = "https://www.onenote.com/api/v1.0/me/notes/notebooks"
+
+	// URLGETSections stores the OneNote sections base url
+	URLGETSections = "https://www.onenote.com/api/v1.0/me/notes/notebooks/%s/sections"
 )
 
 var viewStateName = map[ViewState]string{
@@ -68,11 +89,31 @@ var viewStateName = map[ViewState]string{
 	StateFinishAuthenticate: "finishauthenticate",
 	StateLoadNotebooks:      "loadnotebooks",
 	StateViewNotebooks:      "viewnotebooks",
+	StateLoadSections:       "loadsections",
+	StateViewSections:       "viewsections",
+	StateLoadPages:          "loadpages",
+	StateViewPages:          "viewpages",
+	StateLoadPage:           "loadpage",
+	StateViewPage:           "viewpage",
 }
 
 // Notebook is the datatype representing a notebook
 type Notebook struct {
 	Name string
+	ID   string
+}
+
+// Section is a notebook section
+type Section struct {
+	Name string
+	ID   string
+}
+
+// Page is a section page
+type Page struct {
+	Name    string
+	ID      string
+	Content string
 }
 
 // User is the structure holding relevant data
@@ -84,13 +125,19 @@ type User struct {
 	CurrentViewState ViewState
 	Window           *gocui.Gui
 	Notebooks        []Notebook
+	CurrentNotebook  Notebook
+	Sections         []Section
+	Pages            []Page
 	StateData        string
 }
 
 // Get does an http GET with the user's credentials
-func (u *User) Get(url string) (*http.Response, error) {
+func (u *User) Get(url string, args ...interface{}) (*http.Response, error) {
 	if u.LoggedIn() {
-		return u.Config.Client(oauth2.NoContext, u.Token).Get(url)
+		getURL := fmt.Sprintf(url, args...)
+		log.Println("Starting get request:")
+		log.Println(getURL)
+		return u.Config.Client(oauth2.NoContext, u.Token).Get(getURL)
 	}
 	u.SetViewState(StateStartAuthenticate)
 	return nil, nil
@@ -98,24 +145,40 @@ func (u *User) Get(url string) (*http.Response, error) {
 
 // LoadNotebooks will get all the user notebooks and store them in the struct
 func (u *User) LoadNotebooks() {
-	r, err := u.Get(URLNotebooks)
+	defer u.SetViewState(StateViewNotebooks)
+	r, err := u.Get(URLGETNotebooks)
 	if err != nil {
 		log.Println("Getting notebooks failed")
 	}
-	//log.Println(r)
-	defer r.Body.Close()
 
-	notebooks, err := ioutil.ReadAll(r.Body)
+	json.Unmarshal(processResponse(r), &u.Notebooks)
+	// log.Println(u.Notebooks)
+}
+
+// LoadSections gets data to populate the section view
+func (u *User) LoadSections(n Notebook) {
+	defer u.SetViewState(StateViewSections)
+
+	r, err := u.Get(URLGETSections, n.ID)
 	if err != nil {
 		log.Println(err)
 	}
 
-	// resp := make(map[string]interface{})
+	json.Unmarshal(processResponse(r), &u.Sections)
+	// log.Println(u.Sections)
+}
+
+func processResponse(r *http.Response) []byte {
+	defer r.Body.Close()
+
+	data, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Println(err)
+	}
+
 	var resp map[string]*json.RawMessage
-	json.Unmarshal(notebooks, &resp)
-	json.Unmarshal(*resp["value"], &u.Notebooks)
-	log.Println(u.Notebooks)
-	u.SetViewState(StateViewNotebooks)
+	json.Unmarshal(data, &resp)
+	return *resp["value"]
 }
 
 // LoggedIn checks to see if the user api token is working
@@ -159,10 +222,10 @@ func (u *User) LogOut() {
 	// TODO: set RedirectURL to urn:ietf:wg:oauth:2.0:oob
 	_, err := u.Get("https://login.live.com/oauth20_logout.srf?client_id=" + u.Config.ClientID)
 	if err != nil {
-		fmt.Println("Error!")
+		log.Println("Error!")
 		return
 	}
-	fmt.Println("Signed out successfully...")
+	log.Println("Signed out successfully...")
 }
 
 func init() {
@@ -250,15 +313,17 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	user.Window.SetKeybinding("notebooks", 'j', gocui.ModNone, cursorDownHandler)
-	user.Window.SetKeybinding("notebooks", gocui.KeyArrowDown, gocui.ModNone, cursorDownHandler)
+	user.Window.SetKeybinding("", 'j', gocui.ModNone, cursorDownHandler)
+	user.Window.SetKeybinding("", gocui.KeyArrowDown, gocui.ModNone, cursorDownHandler)
 
-	user.Window.SetKeybinding("notebooks", 'k', gocui.ModNone, cursorUpHandler)
-	user.Window.SetKeybinding("notebooks", gocui.KeyArrowUp, gocui.ModNone, cursorUpHandler)
+	user.Window.SetKeybinding("", 'k', gocui.ModNone, cursorUpHandler)
+	user.Window.SetKeybinding("", gocui.KeyArrowUp, gocui.ModNone, cursorUpHandler)
 
-	user.Window.SetKeybinding("notebooks", 'q', gocui.ModNone, quit)
+	user.Window.SetKeybinding("", 'b', gocui.ModNone, backHandler)
 
-	user.Window.SetKeybinding("notebooks", gocui.KeyEnter, gocui.ModNone, selectHandler)
+	user.Window.SetKeybinding("", 'q', gocui.ModNone, quit)
+
+	user.Window.SetKeybinding("", gocui.KeyEnter, gocui.ModNone, selectHandler)
 
 	if err := user.Window.MainLoop(); err != nil && err != gocui.ErrQuit {
 		log.Panicln(err)
@@ -267,23 +332,67 @@ func main() {
 	log.Println("===========================================")
 }
 
+func backHandler(g *gocui.Gui, v *gocui.View) error {
+	switch user.CurrentViewState {
+	case StateViewNotebooks:
+		// Nowhere to go
+		break
+	case StateViewSections:
+		// Go to notebooks
+		// user.SetViewState(StateLoadNotebooks)
+		user.CurrentViewState = StateLoadNotebooks
+		break
+	case StateViewPages:
+		// Go to sections
+		// user.SetViewState(StateLoadSections)
+		user.CurrentViewState = StateLoadSections
+		break
+	}
+	return nil
+}
+
 func selectHandler(g *gocui.Gui, v *gocui.View) error {
-	if g.CurrentView() != nil {
+	states := []ViewState{StateViewNotebooks, StateViewSections, StateViewPages}
+
+	if user.inState(states) && g.CurrentView() != nil {
 		vw := g.CurrentView()
-		if vw.Name() == "notebooks" {
+		switch user.CurrentViewState {
+		case StateViewNotebooks:
 			_, ind := vw.Cursor()
 			nb := user.Notebooks[ind]
 			user.StateData = nb.Name
-			log.Printf("You selected notebook: %s\n", nb.Name)
+			log.Printf("Selected notebook: %s\n", nb.Name)
+			user.CurrentNotebook = nb
+			user.CurrentViewState = StateLoadSections
+			// user.SetViewState(StateLoadSections)
 		}
 	}
 	return nil
 }
 
+func (u *User) inState(arr []ViewState) bool {
+	for _, v := range arr {
+		if u.CurrentViewState == v {
+			return true
+		}
+	}
+	return false
+}
+
 func cursorDownHandler(g *gocui.Gui, v *gocui.View) error {
-	if g.CurrentView() != nil {
+	states := []ViewState{StateViewNotebooks, StateViewSections, StateViewPages}
+	if user.inState(states) && g.CurrentView() != nil {
 		_, y := g.CurrentView().Cursor()
-		if g.CurrentView().Name() == "notebooks" && len(user.Notebooks) <= y+1 {
+		var max int
+		switch user.CurrentViewState {
+		case StateViewNotebooks:
+			max = len(user.Notebooks) - 1
+			break
+		case StateViewSections:
+			max = len(user.Sections) - 1
+			break
+		}
+		if y >= max {
 			return nil
 		}
 		g.CurrentView().MoveCursor(0, 1, false)
@@ -292,7 +401,9 @@ func cursorDownHandler(g *gocui.Gui, v *gocui.View) error {
 }
 
 func cursorUpHandler(g *gocui.Gui, v *gocui.View) error {
-	if g.CurrentView() != nil {
+	states := []ViewState{StateViewNotebooks, StateViewSections, StateViewPages}
+
+	if user.inState(states) && g.CurrentView() != nil {
 		g.CurrentView().MoveCursor(0, -1, false)
 	}
 	return nil
@@ -342,21 +453,23 @@ func layout(g *gocui.Gui) error {
 	// log.Println("Current user state data:")
 	// log.Println(user.StateData)
 	maxX, maxY := g.Size()
+	var v *gocui.View
+	var err error
 	switch user.CurrentViewState {
 	case StateStartAuthenticate:
-		if v, err := g.SetView("signin_link", 0, maxY/2-10, maxX-1, maxY/2+10); err != nil {
+		v, err = g.SetView("signin_link", 0, maxY/2-10, maxX-1, maxY/2+10)
+		if err != nil {
 			if err != gocui.ErrUnknownView {
 				return err
 			}
 			v.Title = "Sign In"
 			v.Wrap = true
 			fmt.Fprintln(v, "Getting authentication link...")
-			go user.StartAuth()
-			g.SetCurrentView(v.Name())
 		}
+		go user.StartAuth()
 		break
 	case StateFinishAuthenticate:
-		v, err := g.View("signin_link")
+		v, err = g.View("signin_link")
 		if err != nil {
 			log.Println(err)
 		}
@@ -365,21 +478,20 @@ func layout(g *gocui.Gui) error {
 		v.Clear()
 		fmt.Fprintln(v, user.StateData)
 		log.Println("Authentication link:\n" + user.StateData)
-		g.SetCurrentView(v.Name())
 		break
 	case StateLoadNotebooks:
-		if v, err := g.SetView("notebooks", 0, 0, maxX-1, maxY-1); err != nil {
+		v, err = g.SetView("notebooks", 0, 0, maxX-1, maxY-1)
+		if err != nil {
 			if err != gocui.ErrUnknownView {
 				return err
 			}
 			v.Title = "Notebooks"
 			fmt.Fprintln(v, "Loading notebooks...")
-			go user.LoadNotebooks()
-			g.SetCurrentView(v.Name())
 		}
+		go user.LoadNotebooks()
 		break
 	case StateViewNotebooks:
-		v, err := g.View("notebooks")
+		v, err = g.View("notebooks")
 		if err != nil {
 			log.Println(err)
 		}
@@ -391,8 +503,47 @@ func layout(g *gocui.Gui) error {
 		for _, n := range user.Notebooks {
 			fmt.Fprintln(v, n.Name)
 		}
-		g.SetCurrentView(v.Name())
+		break
+	case StateLoadSections:
+		v, err = g.SetView("sections", 0, 0, maxX-1, maxY-1)
+		if err != nil {
+			if err != gocui.ErrUnknownView {
+				return err
+			}
+			v.Title = "Sections"
+			fmt.Fprintln(v, "Loading sections...")
+		}
+		go user.LoadSections(user.CurrentNotebook)
+		break
+	case StateViewSections:
+		v, err = g.View("sections")
+		if err != nil {
+			log.Println(err)
+		}
+		v.Title = user.CurrentNotebook.Name + " - Sections"
+		v.Clear()
+		v.Highlight = true
+		v.SelBgColor = gocui.Attribute(termbox.ColorWhite)
+		v.SelFgColor = gocui.Attribute(termbox.ColorBlack)
+		for _, s := range user.Sections {
+			fmt.Fprintln(v, s.Name)
+		}
+		break
+	case StateLoadPages:
+		break
+	case StateViewPages:
+		break
+	case StateLoadPage:
+		break
+	case StateViewPage:
+		break
 	}
+
+	vX, vY := v.Size()
+
+	g.SetCurrentView(v.Name())
+	g.SetViewOnTop(v.Name())
+	v.SetCursor(vX, vY)
 
 	return nil
 }
@@ -403,7 +554,7 @@ func (u *User) GetPages(g *gocui.Gui) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(pages)
+	log.Println(pages)
 }
 
 func quit(g *gocui.Gui, v *gocui.View) error {
