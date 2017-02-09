@@ -1,13 +1,13 @@
 package main
 
 /* BIG TODO
-*  1. Fix up state transition model
-*    - channels between api fetching methods and renderer look weird
-*    - E.g. need more abrupt transition to the auth state from a regular view
-*    - figure out how to highlight and "click" on menu items terminal_velocity style
+*  1. Double check view state transition model for weirdness (use logs)
 *  2. Shore up API key storage, security
+*     - We can drop the client secret if we use the implciit MS flow,
+*       unfortunately, this means we need the redirect URI to have the access
+*       in a url fragment, which Go doesn't like...
 *  3. Have a plan for cacheing vs. syncing
-*  4. Clean up the module structure, separate into modules (PLEASE DEAR GOD)
+*  4. Clean up the module structure, separate into modules
  */
 
 import (
