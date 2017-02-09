@@ -250,11 +250,15 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	user.Window.SetKeybinding("", 'j', gocui.ModNone, cursorDownHandler)
-	user.Window.SetKeybinding("", gocui.KeyArrowDown, gocui.ModNone, cursorDownHandler)
+	user.Window.SetKeybinding("notebooks", 'j', gocui.ModNone, cursorDownHandler)
+	user.Window.SetKeybinding("notebooks", gocui.KeyArrowDown, gocui.ModNone, cursorDownHandler)
 
-	user.Window.SetKeybinding("", 'k', gocui.ModNone, cursorUpHandler)
-	user.Window.SetKeybinding("", gocui.KeyArrowUp, gocui.ModNone, cursorUpHandler)
+	user.Window.SetKeybinding("notebooks", 'k', gocui.ModNone, cursorUpHandler)
+	user.Window.SetKeybinding("notebooks", gocui.KeyArrowUp, gocui.ModNone, cursorUpHandler)
+
+	user.Window.SetKeybinding("notebooks", 'q', gocui.ModNone, quit)
+
+	user.Window.SetKeybinding("notebooks", gocui.KeyEnter, gocui.ModNone, selectHandler)
 
 	if err := user.Window.MainLoop(); err != nil && err != gocui.ErrQuit {
 		log.Panicln(err)
@@ -263,8 +267,25 @@ func main() {
 	log.Println("===========================================")
 }
 
+func selectHandler(g *gocui.Gui, v *gocui.View) error {
+	if g.CurrentView() != nil {
+		vw := g.CurrentView()
+		if vw.Name() == "notebooks" {
+			_, ind := vw.Cursor()
+			nb := user.Notebooks[ind]
+			user.StateData = nb.Name
+			log.Printf("You selected notebook: %s\n", nb.Name)
+		}
+	}
+	return nil
+}
+
 func cursorDownHandler(g *gocui.Gui, v *gocui.View) error {
 	if g.CurrentView() != nil {
+		_, y := g.CurrentView().Cursor()
+		if g.CurrentView().Name() == "notebooks" && len(user.Notebooks) <= y+1 {
+			return nil
+		}
 		g.CurrentView().MoveCursor(0, 1, false)
 	}
 	return nil
@@ -386,5 +407,6 @@ func (u *User) GetPages(g *gocui.Gui) {
 }
 
 func quit(g *gocui.Gui, v *gocui.View) error {
+	log.Println("Quitting")
 	return gocui.ErrQuit
 }
