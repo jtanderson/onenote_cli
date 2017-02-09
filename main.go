@@ -31,6 +31,7 @@ import (
 	"encoding/gob"
 
 	"github.com/jroimartin/gocui"
+	termbox "github.com/nsf/termbox-go"
 )
 
 //var l net.Listener
@@ -40,12 +41,18 @@ var user User
 type ViewState int
 
 const (
-	// StateAuthenticate is used when the user needs to take action
+	// StateStartAuthenticate is used when the user needs to take action
 	// to obtain a new or refreshed OAuth token
-	StateAuthenticate = iota
+	StateStartAuthenticate = iota
 
-	// StateNotebooks is the state showing all notebooks
-	StateNotebooks
+	// StateFinishAuthenticate is the end of the auth process
+	StateFinishAuthenticate
+
+	// StateLoadNotebooks is loading notebooks
+	StateLoadNotebooks
+
+	// StateViewNotebooks shows the notebooks
+	StateViewNotebooks
 )
 
 const (
@@ -57,8 +64,10 @@ const (
 )
 
 var viewStateName = map[ViewState]string{
-	StateAuthenticate: "authenticate",
-	StateNotebooks:    "notebooks",
+	StateStartAuthenticate:  "startauthenticate",
+	StateFinishAuthenticate: "finishauthenticate",
+	StateLoadNotebooks:      "loadnotebooks",
+	StateViewNotebooks:      "viewnotebooks",
 }
 
 // Notebook is the datatype representing a notebook
@@ -75,23 +84,20 @@ type User struct {
 	CurrentViewState ViewState
 	Window           *gocui.Gui
 	Notebooks        []Notebook
+	StateData        string
 }
 
 // Get does an http GET with the user's credentials
 func (u *User) Get(url string) (*http.Response, error) {
-	return u.Client().Get(url)
-}
-
-// Client returns a pointer to the http client for the user
-func (u *User) Client() *http.Client {
-	c := make(chan string)
-	go u.Auth(c)
-	<-c
-	return u.Config.Client(oauth2.NoContext, u.Token)
+	if u.LoggedIn() {
+		return u.Config.Client(oauth2.NoContext, u.Token).Get(url)
+	}
+	u.SetViewState(StateStartAuthenticate)
+	return nil, nil
 }
 
 // LoadNotebooks will get all the user notebooks and store them in the struct
-func (u *User) LoadNotebooks(ready chan bool) {
+func (u *User) LoadNotebooks() {
 	r, err := u.Get(URLNotebooks)
 	if err != nil {
 		log.Println("Getting notebooks failed")
@@ -109,38 +115,42 @@ func (u *User) LoadNotebooks(ready chan bool) {
 	json.Unmarshal(notebooks, &resp)
 	json.Unmarshal(*resp["value"], &u.Notebooks)
 	log.Println(u.Notebooks)
-	ready <- true
+	u.SetViewState(StateViewNotebooks)
 }
 
-// Auth makes sure the authentication is up-to-date
-func (u *User) Auth(link chan string) {
+// LoggedIn checks to see if the user api token is working
+func (u *User) LoggedIn() bool {
 	if !u.Token.Valid() {
-		// TODO: skip the user click action if we don't need to)
-		log.Println("Token detected as invalid")
+		log.Println("Token detected as invalid.")
 
 		r, _ := http.Get("https://www.onenote.com/api/v1.0/me/notes/pages")
-
 		if r.StatusCode != 200 {
-			log.Println("Pages probe failed. Need to Auth")
-			state := randToken()
-
-			l, err := net.Listen("tcp", ":12345")
-			http.HandleFunc("/auth", makeHandlerFunc(handler, l))
-			if err != nil {
-				log.Fatalln(err)
-			}
-			go http.Serve(l, nil)
-			log.Println("Now awaiting authentication redirect...")
-			link <- u.Config.AuthCodeURL(state)
-		} else {
-			log.Println("Pages probe returned status 200")
-			u.SetViewState(StateNotebooks)
-			link <- "none"
+			return false
 		}
+		return true
+	}
+	return true
+}
+
+// StartAuth is the start of the auth procedure
+func (u *User) StartAuth() {
+	if !u.LoggedIn() {
+		log.Println("Need to Auth")
+		state := randToken()
+
+		l, err := net.Listen("tcp", ":12345")
+		http.HandleFunc("/auth", makeHandlerFunc(handler, l))
+		if err != nil {
+			log.Fatalln(err)
+		}
+		go http.Serve(l, nil)
+		log.Println("Now awaiting authentication redirect...")
+		// message = u.Config.AuthCodeURL(state)
+		user.StateData = u.Config.AuthCodeURL(state)
+		u.SetViewState(StateFinishAuthenticate)
 	} else {
-		log.Println("Token is still valid")
-		u.SetViewState(StateNotebooks)
-		link <- "none"
+		log.Println("Pages probe returned status 200")
+		u.SetViewState(StateLoadNotebooks)
 	}
 }
 
@@ -232,17 +242,39 @@ func main() {
 	}
 	defer user.Window.Close()
 
+	// user.Window.Highlight = true
+	user.Window.Cursor = true
 	user.Window.SetManagerFunc(layout)
 
 	if err := user.Window.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
 		log.Fatalln(err)
 	}
 
+	user.Window.SetKeybinding("", 'j', gocui.ModNone, cursorDownHandler)
+	user.Window.SetKeybinding("", gocui.KeyArrowDown, gocui.ModNone, cursorDownHandler)
+
+	user.Window.SetKeybinding("", 'k', gocui.ModNone, cursorUpHandler)
+	user.Window.SetKeybinding("", gocui.KeyArrowUp, gocui.ModNone, cursorUpHandler)
+
 	if err := user.Window.MainLoop(); err != nil && err != gocui.ErrQuit {
 		log.Panicln(err)
 	}
 
 	log.Println("===========================================")
+}
+
+func cursorDownHandler(g *gocui.Gui, v *gocui.View) error {
+	if g.CurrentView() != nil {
+		g.CurrentView().MoveCursor(0, 1, false)
+	}
+	return nil
+}
+
+func cursorUpHandler(g *gocui.Gui, v *gocui.View) error {
+	if g.CurrentView() != nil {
+		g.CurrentView().MoveCursor(0, -1, false)
+	}
+	return nil
 }
 
 func makeHandlerFunc(fn http.HandlerFunc, l net.Listener) http.HandlerFunc {
@@ -268,7 +300,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	//log.Println(user)
 	user.Save()
-	user.SetViewState(StateNotebooks)
+	user.SetViewState(StateLoadNotebooks)
 }
 
 func randToken() string {
@@ -284,36 +316,61 @@ func (u *User) SetViewState(state ViewState) {
 }
 
 func layout(g *gocui.Gui) error {
+	log.Println("Calling layout function...")
+	log.Printf("Current user state: %s\n", viewStateName[user.CurrentViewState])
+	// log.Println("Current user state data:")
+	// log.Println(user.StateData)
 	maxX, maxY := g.Size()
 	switch user.CurrentViewState {
-	case StateAuthenticate:
+	case StateStartAuthenticate:
 		if v, err := g.SetView("signin_link", 0, maxY/2-10, maxX-1, maxY/2+10); err != nil {
 			if err != gocui.ErrUnknownView {
 				return err
 			}
+			v.Title = "Sign In"
 			v.Wrap = true
-			link := make(chan string)
 			fmt.Fprintln(v, "Getting authentication link...")
-			go user.Auth(link)
-			lnk := <-link
-			fmt.Fprintln(v, lnk)
-			log.Println("Authentication link:\n" + lnk)
+			go user.StartAuth()
+			g.SetCurrentView(v.Name())
 		}
 		break
-	case StateNotebooks:
+	case StateFinishAuthenticate:
+		v, err := g.View("signin_link")
+		if err != nil {
+			log.Println(err)
+		}
+		v.Title = "Sign In"
+		v.Wrap = true
+		v.Clear()
+		fmt.Fprintln(v, user.StateData)
+		log.Println("Authentication link:\n" + user.StateData)
+		g.SetCurrentView(v.Name())
+		break
+	case StateLoadNotebooks:
 		if v, err := g.SetView("notebooks", 0, 0, maxX-1, maxY-1); err != nil {
 			if err != gocui.ErrUnknownView {
 				return err
 			}
-			ready := make(chan bool)
+			v.Title = "Notebooks"
 			fmt.Fprintln(v, "Loading notebooks...")
-			go user.LoadNotebooks(ready)
-			<-ready
-			v.Clear()
-			for _, n := range user.Notebooks {
-				fmt.Fprintln(v, n.Name)
-			}
+			go user.LoadNotebooks()
+			g.SetCurrentView(v.Name())
 		}
+		break
+	case StateViewNotebooks:
+		v, err := g.View("notebooks")
+		if err != nil {
+			log.Println(err)
+		}
+		v.Title = "Notebooks"
+		v.Clear()
+		v.Highlight = true
+		v.SelBgColor = gocui.Attribute(termbox.ColorWhite)
+		v.SelFgColor = gocui.Attribute(termbox.ColorBlack)
+		for _, n := range user.Notebooks {
+			fmt.Fprintln(v, n.Name)
+		}
+		g.SetCurrentView(v.Name())
 	}
 
 	return nil
