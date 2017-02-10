@@ -33,6 +33,8 @@ import (
 
 	"github.com/jroimartin/gocui"
 	termbox "github.com/nsf/termbox-go"
+
+	"github.com/clbanning/mxj"
 )
 
 //var l net.Listener
@@ -198,7 +200,12 @@ func (u *User) LoadPage(p Page) {
 	defer r.Body.Close()
 
 	responseData, err := ioutil.ReadAll(r.Body)
-	u.CurrentPage.Content = string(responseData) //TODO: strip whitespace, parse
+	mv, err := mxj.NewMapXml(responseData)
+	log.Println(mv)
+	log.Println(mv.LeafPaths())
+	log.Println(mv.LeafValues())
+	log.Println(mv.Elements("html.body"))
+	u.CurrentPage.Content = "" //string(responseData)[1:100] //TODO: strip whitespace, parse
 }
 
 // processResponse grabs the API data and returns the byte steram to be
@@ -633,7 +640,6 @@ func layout(g *gocui.Gui) error {
 		v.Highlight = true
 		v.SelBgColor = gocui.Attribute(termbox.ColorWhite)
 		v.SelFgColor = gocui.Attribute(termbox.ColorBlack)
-		log.Println(user.CurrentPage.Content)
 		fmt.Fprintln(v, user.CurrentPage.Content)
 		break
 	}
