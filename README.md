@@ -34,4 +34,4 @@ you have a terminal that allows such things.
 
 ## Screenshot
 
-![Screenshot](/img/kQWy37Z.gifv?raw=true "Screenshot")
+![Screenshot](img/kQWy37Z.gifv?raw=true "Screenshot")
