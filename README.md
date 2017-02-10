@@ -3,7 +3,7 @@
 This project is a terminal-based interface to the Microsoft
 OneNote API. Why? It's fast, clean, and simple.
 
-![screenshot](/img/kQWy37Z.gifv?raw=true "Screenshot")
+![screenshot](/img/6rr3WFy8VI.gif?raw=true "Screenshot")
 
 ## Status
 
