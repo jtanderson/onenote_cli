@@ -7,6 +7,11 @@ OneNote API. Why? It's fast, clean, and simple.
 
 ## Status
 
+*Disclaimer:* This is pure prototype-stage. The code is a hot mess.
+At this point of my life I'm more mathematician than programmer,
+but I will do my best to make the codebase presentable as features
+develop.
+
 Currently everything is read-only, but that aspect seems 
 solidly usable. The sign-in process is slightly clunky in that
 you either have to copy/paste the wrapped segments from the
