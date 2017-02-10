@@ -8,6 +8,7 @@ package main
 *       in a url fragment, which Go doesn't like...
 *  3. Have a plan for cacheing vs. syncing
 *  4. Clean up the module structure, separate into modules
+*  5. Idea: don't invalidate notebooks, sections, and pages until you get higher in the tree
  */
 
 import (
@@ -74,14 +75,17 @@ const (
 )
 
 const (
-	// URLGETPages stores the OneNote pages base url
-	URLGETPages = "https://www.onenote.com/api/v1.0/me/notes/pages"
-
 	// URLGETNotebooks stores the OneNote notebooks base url
 	URLGETNotebooks = "https://www.onenote.com/api/v1.0/me/notes/notebooks"
 
 	// URLGETSections stores the OneNote sections base url
 	URLGETSections = "https://www.onenote.com/api/v1.0/me/notes/notebooks/%s/sections"
+
+	// URLGETPages stores the OneNote pages base url
+	URLGETPages = "https://www.onenote.com/api/v1.0/me/notes/sections/%s/pages"
+
+	// URLGETPage stores the OneNote page base url
+	URLGETPage = "https://www.onenote.com/api/v1.0/me/notes/pages/%s"
 )
 
 var viewStateName = map[ViewState]string{
@@ -127,7 +131,9 @@ type User struct {
 	Notebooks        []Notebook
 	CurrentNotebook  Notebook
 	Sections         []Section
+	CurrentSection   Section
 	Pages            []Page
+	CurrentPage      Page
 	StateData        string
 }
 
@@ -168,6 +174,32 @@ func (u *User) LoadSections(n Notebook) {
 	// log.Println(u.Sections)
 }
 
+// LoadPages gets data to populate page list
+func (u *User) LoadPages(s Section) {
+	defer u.SetViewState(StateViewPages)
+
+	r, err := u.Get(URLGETPages, s.ID)
+	if err != nil {
+		log.Println(err)
+	}
+
+	json.Unmarshal(processResponse(r), &u.Pages)
+}
+
+// LoadPage calls the api for the page data
+func (u *User) LoadPage(p Page) {
+	defer u.SetViewState(StateViewPage)
+
+	r, err := u.Get(URLGETPage, p.ID)
+	if err != nil {
+		log.Println(err)
+	}
+
+	json.Unmarshal(processResponse(r), &u.CurrentPage)
+}
+
+// processResponse grabs the API data and returns the byte steram to be
+// Unmarshaled into the relevant structure
 func processResponse(r *http.Response) []byte {
 	defer r.Body.Close()
 
@@ -204,7 +236,7 @@ func (u *User) StartAuth() {
 		l, err := net.Listen("tcp", ":12345")
 		http.HandleFunc("/auth", makeHandlerFunc(handler, l))
 		if err != nil {
-			log.Fatalln(err)
+			log.Println(err)
 		}
 		go http.Serve(l, nil)
 		log.Println("Now awaiting authentication redirect...")
@@ -212,7 +244,7 @@ func (u *User) StartAuth() {
 		user.StateData = u.Config.AuthCodeURL(state)
 		u.SetViewState(StateFinishAuthenticate)
 	} else {
-		log.Println("Pages probe returned status 200")
+		log.Println("Already logged in")
 		u.SetViewState(StateLoadNotebooks)
 	}
 }
@@ -295,6 +327,7 @@ func main() {
 	}
 	defer f.Close()
 	log.SetOutput(f)
+	log.Println("==========================================")
 
 	user.Load()
 
@@ -326,7 +359,7 @@ func main() {
 	user.Window.SetKeybinding("", gocui.KeyEnter, gocui.ModNone, selectHandler)
 
 	if err := user.Window.MainLoop(); err != nil && err != gocui.ErrQuit {
-		log.Panicln(err)
+		log.Println(err)
 	}
 
 	log.Println("===========================================")
@@ -347,6 +380,10 @@ func backHandler(g *gocui.Gui, v *gocui.View) error {
 		// user.SetViewState(StateLoadSections)
 		user.CurrentViewState = StateLoadSections
 		break
+	case StateViewPage:
+		// Go to pages
+		user.CurrentViewState = StateLoadPages
+		break
 	}
 	return nil
 }
@@ -365,6 +402,21 @@ func selectHandler(g *gocui.Gui, v *gocui.View) error {
 			user.CurrentNotebook = nb
 			user.CurrentViewState = StateLoadSections
 			// user.SetViewState(StateLoadSections)
+			break
+		case StateViewSections:
+			_, ind := vw.Cursor()
+			sec := user.Sections[ind]
+			user.StateData = sec.Name
+			user.CurrentSection = sec
+			user.CurrentViewState = StateLoadPages
+			break
+		case StateViewPages:
+			_, ind := vw.Cursor()
+			p := user.Pages[ind]
+			user.StateData = p.Name
+			user.CurrentPage = p
+			user.CurrentViewState = StateLoadPage
+			break
 		}
 	}
 	return nil
@@ -530,22 +582,66 @@ func layout(g *gocui.Gui) error {
 		}
 		break
 	case StateLoadPages:
+		v, err = g.SetView("pages", 0, 0, maxX-1, maxY-1)
+		if err != nil {
+			if err != gocui.ErrUnknownView {
+				return err
+			}
+			v.Title = "Pages"
+			fmt.Fprintln(v, "Loading pages...")
+		}
+		go user.LoadPages(user.CurrentSection)
 		break
 	case StateViewPages:
+		v, err = g.View("pages")
+		if err != nil {
+			log.Println(err)
+		}
+		v.Title = user.CurrentNotebook.Name + " - " + user.CurrentSection.Name + " - Pages"
+		v.Clear()
+		v.Highlight = true
+		v.SelBgColor = gocui.Attribute(termbox.ColorWhite)
+		v.SelFgColor = gocui.Attribute(termbox.ColorBlack)
+		for _, p := range user.Pages {
+			fmt.Fprintln(v, p.Name)
+		}
 		break
 	case StateLoadPage:
+		v, err = g.SetView("page", 0, 0, maxX-1, maxY-1)
+		if err != nil {
+			if err != gocui.ErrUnknownView {
+				return err
+			}
+			v.Title = user.CurrentPage.Name
+			fmt.Fprintln(v, "Loading pages...")
+		}
+		go user.LoadPage(user.CurrentPage)
 		break
 	case StateViewPage:
+		v, err = g.View("page")
+		if err != nil {
+			log.Println(err)
+		}
+		v.Title = user.CurrentPage.Name
+		v.Clear()
+		v.Highlight = true
+		v.SelBgColor = gocui.Attribute(termbox.ColorWhite)
+		v.SelFgColor = gocui.Attribute(termbox.ColorBlack)
+		fmt.Fprintln(v, user.CurrentPage.Content)
 		break
 	}
 
+	focus(g, v)
+
+	return nil
+}
+
+func focus(g *gocui.Gui, v *gocui.View) {
 	vX, vY := v.Size()
 
 	g.SetCurrentView(v.Name())
 	g.SetViewOnTop(v.Name())
 	v.SetCursor(vX, vY)
-
-	return nil
 }
 
 // GetPages set up the view of pages
