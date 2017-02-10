@@ -281,22 +281,14 @@ func (u *User) LogOut() {
 func init() {
 	// Load the config data
 	conf := &oauth2.Config{
-		ClientID:     "", // Should be set inside ./creds.json
-		ClientSecret: "", // Should be set inside ./creds.json
+		ClientID:     "41f4623c-c157-4cab-9c3e-3c4b252c5f78", // Should be set inside ./creds.json
+		ClientSecret: "aByaemF7Mga8Xfnmm4vTxHb",              // Should be set inside ./creds.json
 		Scopes: []string{
 			"openid",
 			"office.onenote_update",
 		},
 		Endpoint: microsoft.LiveConnectEndpoint,
 	}
-
-	file, err := ioutil.ReadFile("./creds.json")
-	if err != nil {
-		log.Printf("File error: %v\n", err)
-		os.Exit(1)
-	}
-
-	json.Unmarshal(file, &conf)
 
 	user.Config = conf
 }
