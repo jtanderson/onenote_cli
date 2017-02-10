@@ -119,7 +119,7 @@ type Section struct {
 type Page struct {
 	Title      string
 	ID         string
-	Content    string
+	Content    mxj.Map
 	ContentURL string
 }
 
@@ -201,11 +201,19 @@ func (u *User) LoadPage(p Page) {
 
 	responseData, err := ioutil.ReadAll(r.Body)
 	mv, err := mxj.NewMapXml(responseData)
-	log.Println(mv)
-	log.Println(mv.LeafPaths())
-	log.Println(mv.LeafValues())
-	log.Println(mv.Elements("html.body"))
-	u.CurrentPage.Content = "" //string(responseData)[1:100] //TODO: strip whitespace, parse
+	if err != nil {
+		log.Println(err)
+	}
+	// log.Println(mv)
+	// log.Println(mv.LeafPaths())
+	// log.Println(mv.LeafValues())
+	// log.Println(mv.Elements("html.body"))
+	// u.CurrentPage.Content = "" //string(responseData)[1:100] //TODO: strip whitespace, parse
+	u.CurrentPage.Content = mv
+}
+
+func pruneXML(m mxj.Map) {
+	// htmlAllowed := []string{"html", "body", "div", "span", "p", "br"}
 }
 
 // processResponse grabs the API data and returns the byte steram to be
@@ -626,8 +634,9 @@ func layout(g *gocui.Gui) error {
 				return err
 			}
 			v.Title = user.CurrentPage.Title
-			fmt.Fprintln(v, "Loading pages...")
+			fmt.Fprintln(v, "Loading page...")
 		}
+		v.Clear()
 		go user.LoadPage(user.CurrentPage)
 		break
 	case StateViewPage:
@@ -638,15 +647,29 @@ func layout(g *gocui.Gui) error {
 		v.Title = user.CurrentPage.Title
 		v.Clear()
 		v.Highlight = true
+		v.Wrap = true
 		v.SelBgColor = gocui.Attribute(termbox.ColorWhite)
 		v.SelFgColor = gocui.Attribute(termbox.ColorBlack)
-		fmt.Fprintln(v, user.CurrentPage.Content)
+		// fmt.Fprintln(v, user.CurrentPage.Content)
+		user.RenderCurrentPage(v)
 		break
 	}
 
 	focus(g, v)
 
 	return nil
+}
+
+// RenderCurrentPage prints the XML
+func (u *User) RenderCurrentPage(v *gocui.View) {
+	vals, err := u.CurrentPage.Content.ValuesForKey("#text")
+	if err != nil {
+		log.Println(err)
+	}
+	for _, val := range vals {
+		log.Println(val)
+		fmt.Fprintln(v, val)
+	}
 }
 
 func focus(g *gocui.Gui, v *gocui.View) {
