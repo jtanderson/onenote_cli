@@ -659,7 +659,7 @@ func (u *User) RenderCurrentPage(v *gocui.View) {
 		log.Println(err)
 	}
 	for _, val := range vals {
-		log.Println(val)
+		// log.Println(val)
 		fmt.Fprintln(v, val)
 	}
 }
@@ -670,15 +670,6 @@ func focus(g *gocui.Gui, v *gocui.View) {
 	g.SetCurrentView(v.Name())
 	g.SetViewOnTop(v.Name())
 	v.SetCursor(vX, vY)
-}
-
-// GetPages set up the view of pages
-func (u *User) GetPages(g *gocui.Gui) {
-	pages, err := u.Get("https://www.onenote.com/api/v1.0/me/notes/pages")
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println(pages)
 }
 
 func quit(g *gocui.Gui, v *gocui.View) error {
