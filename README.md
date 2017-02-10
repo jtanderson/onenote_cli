@@ -3,6 +3,8 @@
 This project is a terminal-based interface to the Microsoft
 OneNote API. Why? It's fast, clean, and simple.
 
+![screenshot](/img/kQWy37Z.gifv?raw=true "Screenshot")
+
 ## Status
 
 Currently everything is read-only, but that aspect seems 
@@ -31,7 +33,3 @@ you have a terminal that allows such things.
   - [ ] Better text-selection
 - [ ] Security
   - [ ] Propery handle app id and client secret (This is hindered by MS requiring use of url fragments and Golang actively prohibiting it)
-
-## Screenshot
-
-![Screenshot](/img/kQWy37Z.gifv?raw=true "Screenshot")
