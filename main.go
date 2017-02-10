@@ -85,7 +85,7 @@ const (
 	URLGETPages = "https://www.onenote.com/api/v1.0/me/notes/sections/%s/pages"
 
 	// URLGETPage stores the OneNote page base url
-	URLGETPage = "https://www.onenote.com/api/v1.0/me/notes/pages/%s"
+	URLGETPage = "https://www.onenote.com/api/v1.0/me/notes/pages/%s/content"
 )
 
 var viewStateName = map[ViewState]string{
@@ -115,9 +115,10 @@ type Section struct {
 
 // Page is a section page
 type Page struct {
-	Name    string
-	ID      string
-	Content string
+	Title      string
+	ID         string
+	Content    string
+	ContentURL string
 }
 
 // User is the structure holding relevant data
@@ -190,12 +191,14 @@ func (u *User) LoadPages(s Section) {
 func (u *User) LoadPage(p Page) {
 	defer u.SetViewState(StateViewPage)
 
-	r, err := u.Get(URLGETPage, p.ID)
+	r, err := u.Get(p.ContentURL)
 	if err != nil {
 		log.Println(err)
 	}
+	defer r.Body.Close()
 
-	json.Unmarshal(processResponse(r), &u.CurrentPage)
+	responseData, err := ioutil.ReadAll(r.Body)
+	u.CurrentPage.Content = string(responseData) //TODO: strip whitespace, parse
 }
 
 // processResponse grabs the API data and returns the byte steram to be
@@ -327,7 +330,6 @@ func main() {
 	}
 	defer f.Close()
 	log.SetOutput(f)
-	log.Println("==========================================")
 
 	user.Load()
 
@@ -340,6 +342,7 @@ func main() {
 
 	// user.Window.Highlight = true
 	user.Window.Cursor = true
+	user.Window.BgColor = gocui.ColorBlack
 	user.Window.SetManagerFunc(layout)
 
 	if err := user.Window.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
@@ -413,7 +416,7 @@ func selectHandler(g *gocui.Gui, v *gocui.View) error {
 		case StateViewPages:
 			_, ind := vw.Cursor()
 			p := user.Pages[ind]
-			user.StateData = p.Name
+			user.StateData = p.Title
 			user.CurrentPage = p
 			user.CurrentViewState = StateLoadPage
 			break
@@ -442,6 +445,9 @@ func cursorDownHandler(g *gocui.Gui, v *gocui.View) error {
 			break
 		case StateViewSections:
 			max = len(user.Sections) - 1
+			break
+		case StateViewPages:
+			max = len(user.Pages) - 1
 			break
 		}
 		if y >= max {
@@ -517,8 +523,8 @@ func layout(g *gocui.Gui) error {
 			v.Title = "Sign In"
 			v.Wrap = true
 			fmt.Fprintln(v, "Getting authentication link...")
+			go user.StartAuth()
 		}
-		go user.StartAuth()
 		break
 	case StateFinishAuthenticate:
 		v, err = g.View("signin_link")
@@ -603,7 +609,7 @@ func layout(g *gocui.Gui) error {
 		v.SelBgColor = gocui.Attribute(termbox.ColorWhite)
 		v.SelFgColor = gocui.Attribute(termbox.ColorBlack)
 		for _, p := range user.Pages {
-			fmt.Fprintln(v, p.Name)
+			fmt.Fprintln(v, p.Title)
 		}
 		break
 	case StateLoadPage:
@@ -612,7 +618,7 @@ func layout(g *gocui.Gui) error {
 			if err != gocui.ErrUnknownView {
 				return err
 			}
-			v.Title = user.CurrentPage.Name
+			v.Title = user.CurrentPage.Title
 			fmt.Fprintln(v, "Loading pages...")
 		}
 		go user.LoadPage(user.CurrentPage)
@@ -622,11 +628,12 @@ func layout(g *gocui.Gui) error {
 		if err != nil {
 			log.Println(err)
 		}
-		v.Title = user.CurrentPage.Name
+		v.Title = user.CurrentPage.Title
 		v.Clear()
 		v.Highlight = true
 		v.SelBgColor = gocui.Attribute(termbox.ColorWhite)
 		v.SelFgColor = gocui.Attribute(termbox.ColorBlack)
+		log.Println(user.CurrentPage.Content)
 		fmt.Fprintln(v, user.CurrentPage.Content)
 		break
 	}
